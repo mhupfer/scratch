@@ -34,9 +34,30 @@ int main(int argn, char* argv[]) {
     while(p) {
         pid = atoi(p);
 
-        if (pid != 0) {
-            check_pid64(pid);
-            check_proc_name(pid);
+        if (*p == 'z') {
+            /* zombie test */
+            int cpid = fork();
+
+            switch (cpid)
+            {
+            case -1:
+                failed(fork, errno);
+                break;
+            case 0:
+                exit(0);
+                break;
+            default:
+                usleep(20000);
+                /* child should pe a zombie now */
+                check_pid64(cpid);
+                check_proc_name(cpid);
+                break;
+            }
+        } else {
+            if (pid != 0) {
+                check_pid64(pid);
+                check_proc_name(pid);
+            }
         }
 
         p = strtok(NULL, ",");
@@ -67,16 +88,17 @@ int check_pid64(int pid) {
     prop.i.type = _PROC_GET_PROPERTY;
     prop.i.subtype = _PROC_GETPROP_PID64;
     prop.i.pid = pid;
+    pid64_t pid64;
 
-    if (MsgSend(PROCMGR_COID, &prop.i, sizeof(prop.i), &prop, sizeof(prop)) == -1) {
+    if (MsgSend(PROCMGR_COID, &prop.i, sizeof(prop.i), &pid64, sizeof(pid64)) == -1) {
         failed(MsgSend, errno);
         return -1;
     }
 
-    if (msg.o == prop.o.pid64) {
+    if (msg.o == pid64) {
         printf("pid64 test for %d passed\n", pid);
     } else {
-        printf("pid64 test for %d failed, %ld vs. %ld\n", pid, msg.o, prop.o.pid64);
+        printf("pid64 test for %d failed, %ld vs. %ld\n", pid, msg.o, pid64);
         return -1;
     }
     
@@ -90,7 +112,7 @@ int check_pid64(int pid) {
 int check_proc_name(int pid) {
     char    path[PATH_MAX];
     char    buf[PATH_MAX];
-    char    another_buf[PATH_MAX];
+    char    name[PATH_MAX];
     int     fd;
 
     sprintf(path, "/proc/%d/exefile", pid);
@@ -110,26 +132,30 @@ int check_proc_name(int pid) {
 
     close(fd);
 
-    proc_get_property_t *prop = (proc_get_property_t*)another_buf;
+    proc_get_property_t     prop;
 
-    memset(&prop->i, 0, sizeof(prop->i));
-    prop->i.type = _PROC_GET_PROPERTY;
-    prop->i.subtype = _PROC_GETPROP_NAME;
-    prop->i.pid = pid;
+    memset(&prop.i, 0, sizeof(prop.i));
+    prop.i.type = _PROC_GET_PROPERTY;
+    prop.i.subtype = _PROC_GETPROP_NAME;
+    prop.i.pid = pid;
 
-    if (MsgSend(PROCMGR_COID, &prop->i, sizeof(prop->i), prop, sizeof(another_buf)) == -1) {
+    memset(name, 0x33, PATH_MAX);
+
+    long len = MsgSend(PROCMGR_COID, &prop.i, sizeof(prop.i), name, PATH_MAX);
+
+    if (len == -1) {
         failed(MsgSend, errno);
         return -1;
     }
 
-    if (strcmp(buf, prop->o.name.data) == 0) {
-        if (prop->o.name.name_len == strlen(prop->o.name.data)) {
+    if (strcmp(buf, name) == 0) {
+        if (len == strlen(name)) {
             printf("name test for %d passed\n", pid);
         } else {
-            printf("name test for %d failed reported len %u vs. %ld\n", pid, prop->o.name.name_len, strlen(prop->o.name.data));
+            printf("name test for %d failed reported len %lu vs. %ld\n", pid, len, strlen(name));
         }
     } else {
-        printf("name test for %d failed, %s vs. %s\n", pid, buf, prop->o.name.data);
+        printf("name test for %d failed, %s vs. %s\n", pid, buf, name);
     }
 
     return 0;
