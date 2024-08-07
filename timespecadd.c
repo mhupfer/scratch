@@ -20,7 +20,7 @@ void timespecadd_v1(struct timespec *result, __const struct timespec *a, __const
 }
 
 #if 1
-#define __NS_PER_SEC 1000000000 
+#define __NS_PER_SEC 1000000000L
 void timespecadd_v2(struct timespec *result, __const struct timespec *a, __const struct timespec *b) {
     // struct timespec res;
     time_t extra_secs = 0;
@@ -49,7 +49,7 @@ void timespecadd_v2(struct timespec *result, __const struct timespec *a, __const
             result->tv_sec = INT64_MAX;
             result->tv_nsec = INT32_MAX;
         }
-    } 
+    }
 }
 #else
 void timespecadd_v2(struct timespec *result, __const struct timespec *a, __const struct timespec *b) {
@@ -75,7 +75,7 @@ void timespecadd_v2(struct timespec *result, __const struct timespec *a, __const
             result->tv_sec = INT64_MAX;
             result->tv_nsec = INT32_MAX;
         }
-    } 
+    }
 }
 
 #endif
