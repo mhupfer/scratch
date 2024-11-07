@@ -51,11 +51,8 @@ char some_random_data[READMEM_BUF_SIZE];
 int main(int argc, char* argv[]) {
     pid_t           pid = -1;
     pid64_t         mypid64;
-    // mem_map_info_t  kmsg;
     long            rc = 0;
     char            path_buf[PATH_MAX];
-    // uintptr_t       vaddr = 0x1000;
-    // int             vaddr_set = 0;
     pid64_t         pid64;
 
     if (argc > 1) {
@@ -150,7 +147,7 @@ int main(int argc, char* argv[]) {
             exit(1);
         }
 
-        /* resume child */
+        /* continue process */
         rc = continue_proc(fd);
         if (rc != 0) {
             failed(continue_proc, rc);
@@ -299,7 +296,12 @@ int procfs_get_mappings_of_type(int fd, int type, procfs_mapinfo **data, int *no
                 res = devctl(fd, type, mapinfos, no_of_mappings * sizeof(*mapinfos), &cur_no_of_mappings);
 
                 if (res == EOK) {
-                    if (no_of_mappings >= cur_no_of_mappings) ranges[k].o.vaddr == -1
+                    if (no_of_mappings >= cur_no_of_mappings) {
+                        /**
+                         * the number of mappings could have been changed
+                         * during the 2 devctls. If the current number is
+                         * smaller than the original one, repeat
+                        */
                         break;
                     }
                 } else {
@@ -349,6 +351,7 @@ int introspec_get_all_regions(pid64_t pid64, mem_map_info_t **data, int *no_of_r
             }
         } else {
             failed(introspec_mapinfo, -rc);
+            break;
         }
 
     }
@@ -382,6 +385,7 @@ int introspec_get_pagedata_for_region(pid64_t pid64, mem_map_info_t *region, mem
             }
         } else {
             failed(introspec_mapinfo, -rc);
+            break;
         }
 
     }
