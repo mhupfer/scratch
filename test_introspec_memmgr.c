@@ -186,17 +186,17 @@ int main(int argc, char* argv[]) {
         rc = introspec_get_all_regions(pid64, &regions, &no_of_mappings2);
 
         if (rc > 0) {
-            if (no_of_mappings2 != no_of_mappings || memcmp(regions, regions, no_of_mappings * sizeof *mapinfos) != 0) {
-                printf("procfs mapinfo\n");
+            if (no_of_mappings2 != no_of_mappings || memcmp(regions, mapinfos, no_of_mappings * sizeof *mapinfos) != 0) {
+                printf("procfs mapinfo count %d\n", no_of_mappings);
                 printf("--------------\n");
                 for (unsigned u = 0; u < no_of_mappings; u++) {
-                    printf("v=%lx size = %lx offset = %lx paddr = %lx\n", mapinfos[u].vaddr, mapinfos[u].size, mapinfos[u].offset, mapinfos[u].paddr);
+                    printf("v=0x%lx size = 0x%lx offset = 0x%lx paddr = 0x%lx\n", mapinfos[u].vaddr, mapinfos[u].size, mapinfos[u].offset, mapinfos[u].paddr);
                 }
 
-                printf("introspec mapinfo\n");
+                printf("introspec mapinfo count %d\n", no_of_mappings2);
                 printf("-----------------\n");
                 for (unsigned u = 0; u < no_of_mappings2; u++) {
-                    printf("v=%lx size = %lx offset = %lx paddr = %lx\n", regions[u].o.vaddr, 
+                    printf("v=0x%lx size = 0x%lx offset = 0x%lx paddr = 0x%lx\n", regions[u].o.vaddr, 
                         regions[u].o.size, regions[u].o.offset, regions[u].o.paddr);
                 }
 

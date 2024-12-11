@@ -22,4 +22,5 @@
 /* main							*/
 /********************************/
 int main(int argn, char* argv[]) {
+    return EXIT_SUCCESS;
 }
