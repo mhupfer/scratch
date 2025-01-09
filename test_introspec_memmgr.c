@@ -36,6 +36,10 @@ int introspec_get_ptentries_for_region(pid64_t pid64, mem_map_info_t *region, me
 int introspec_get_paddr(pid64_t pid64, uintptr_t vaddr, uintptr_t *paddr);
 int continue_proc(int fd);
 
+#define MAPCMP_FLAG_CMP_PADDRS 1
+
+int mapcmp(mem_map_info_t *one, procfs_mapinfo *other, unsigned no_of_mappings, unsigned flags);
+
 #define test_failed {\
     printf("Test FAILED at %s, %d\n", __func__, __LINE__);\
     exit(1);\
@@ -186,7 +190,7 @@ int main(int argc, char* argv[]) {
         rc = introspec_get_all_regions(pid64, &regions, &no_of_mappings2);
 
         if (rc > 0) {
-            if (no_of_mappings2 != no_of_mappings || memcmp(regions, mapinfos, no_of_mappings * sizeof *mapinfos) != 0) {
+            if (no_of_mappings2 != no_of_mappings || mapcmp(regions, mapinfos, no_of_mappings, 0) != 0) {
                 printf("procfs mapinfo count %d\n", no_of_mappings);
                 printf("--------------\n");
                 for (unsigned u = 0; u < no_of_mappings; u++) {
@@ -223,7 +227,7 @@ int main(int argc, char* argv[]) {
 
             if (rc > 0) {
                 if (range_offset + no_of_ranges <= no_of_mappings) {
-                    if (memcmp(&mapinfos[range_offset], ranges, no_of_ranges) == 0) {
+                    if (mapcmp(ranges, &mapinfos[range_offset], no_of_ranges, MAPCMP_FLAG_CMP_PADDRS) == 0) {
                         range_offset += no_of_ranges;
 
                         /* check pagetable entries for the ranges */
@@ -525,3 +529,33 @@ int continue_proc(int fd) {
 }
 
 
+/********************************/
+/* mapinfo_cmp                  */
+/********************************/
+int mapinfo_cmp(procfs_mapinfo *one, procfs_mapinfo *another, unsigned flags) {
+    if (flags & MAPCMP_FLAG_CMP_PADDRS) {
+        return memcmp(one, another, sizeof(*one));
+    }
+
+    procfs_mapinfo a, b;
+    memcpy(&a, one, sizeof(a));
+    memcpy(&b, one, sizeof(b));
+    a.paddr = b.paddr = 9;
+    return memcmp(&a, &b, sizeof(a));
+}
+
+/********************************/
+/* mapcmp                       */
+/********************************/
+int mapcmp(mem_map_info_t *one, procfs_mapinfo *other, unsigned no_of_mappings, unsigned flags) {
+    int ret;
+
+    for (unsigned u = 0; u < no_of_mappings; u++) {
+        ret = mapinfo_cmp(&one[u].o, &other[u], flags);
+        if (ret) {
+            return ret;
+        }
+    }
+
+    return 0;
+}

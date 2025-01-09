@@ -31,7 +31,7 @@
 #define DUMP_PULSE_CODE _PULSE_CODE_MINAVAIL
 
 int register_dumper_event(int coid);
-int cont_term(pid64_t pid, int status);
+int cont_term(pid64_t pid, bool status);
 int spawn_crash();
 int recv_pulse_to(int chid, struct _pulse *pulse, unsigned to_ms);
 int get_proc_info(pid64_t pid, debug_process_t *info) ;
@@ -86,7 +86,7 @@ int main(int argn, char* argv[]) {
     res = recv_pulse_to(my_chid, &pulse, 1000);
 
     if (res == EOK) {
-        if ((uintptr_t)pulse.value.sival_ptr != (uintptr_t)crash_pid) {
+        if ((pid_t)pulse.value.sival_long != crash_pid) {
             test_failed;
         }
     } else {
@@ -99,7 +99,7 @@ int main(int argn, char* argv[]) {
         test_failed;
     }
 
-    if (cont_term(crash_pid, 1) != EOK) {
+    if (cont_term(crash_pid, true) != EOK) {
         failed(cont_term, errno);
         return EXIT_FAILURE;
     }
@@ -126,7 +126,7 @@ int main(int argn, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    if ((uintptr_t)pulse.value.sival_ptr != (uintptr_t)crash_pid) {
+    if ((pid_t)pulse.value.sival_long != crash_pid) {
         test_failed;
     }
 
@@ -137,7 +137,7 @@ int main(int argn, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    if ((uintptr_t)pulse.value.sival_ptr != (uintptr_t)crash_pid2) {
+    if ((pid_t)pulse.value.sival_long != crash_pid2) {
         test_failed;
     }
 
@@ -203,12 +203,12 @@ int register_dumper_event(int coid) {
 /********************************/
 /* cont_term                    */
 /********************************/
-int cont_term(pid64_t pid, int status) {
+int cont_term(pid64_t pid, bool status) {
     proc_coredump_t	msg;
     msg.i.type = _PROC_COREDUMP;
     msg.i.subtype = _PROC_COREDUMP_CONT_TERM;
     msg.i.pid = pid;
-    msg.i.flags = status == EOK ? FLAG_PROC_CORDEDUMP_SUCCESS : 0;
+    msg.i.success = status;
     
     return MsgSend(PROCMGR_COID, &msg, sizeof(msg), NULL, 0);
 }
