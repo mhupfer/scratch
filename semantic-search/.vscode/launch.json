@@ -1,0 +1,54 @@
+{
+    // Verwendet IntelliSense zum Ermitteln möglicher Attribute.
+    // Zeigen Sie auf vorhandene Attribute, um die zugehörigen Beschreibungen anzuzeigen.
+    // Weitere Informationen finden Sie unter https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: extrcact c funcs",
+            "type": "python",
+            "request": "launch",
+            "program": "extract_c_funcs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["/android/vsomeip"]
+        },
+        {
+            "name": "Python: clang extract c funcs",
+            "type": "python",
+            "request": "launch",
+            "program": "clang_extract_c_funcs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["-r", "/home/mhupfer/scratch/semantic-search/testdata", 
+                    "-q", "where is the ring buffer size set"],
+            "env": {
+                "OPENAI_API_KEY": "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"
+            },
+        },
+        {
+            "name": "Python: Aktuelle Datei",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.env/bin/python3"
+        },
+        {
+            "name": "Python: Code Search",
+            "type": "python",
+            "request": "launch",
+            "program": "openai-cookbook/examples/Code_search.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "OPENAI_API_KEY": "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"
+            },
+            "python": "${workspaceFolder}/.env/bin/python3",
+            "args": [
+                "Command line interface for fine-tuning"
+            ]
+        }
+    ]
+}

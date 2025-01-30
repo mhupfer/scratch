@@ -12,6 +12,9 @@
 // #include <time.h>
 // #include <assert.h>
 //#include <fcntl.h>
+// #include <sys/memmsg.h>
+// #include <sys/procmsg.h>
+// #include <sys/procfs.h>
 
 //build: 
 
@@ -19,14 +22,16 @@
 
 #define usleep_ms(t) usleep((t*1000UL))
 
-// #define PASSED  "\033[92m"
-// #define FAILED "\033[91m"
-// #define ENDC  "\033[0m"
+#if 0
+#define PASSED  "\033[92m"
+#define FAILED "\033[91m"
+#define ENDC  "\033[0m"
 
-// #define test_failed {\
-//     printf(FAILED"Test FAILED"ENDC" at %s, %d\n", __func__, __LINE__);\
-//     exit(1);\
-// }
+#define test_failed {\
+    printf(FAILED"Test FAILED"ENDC" at %s, %d\n", __func__, __LINE__);\
+    exit(1);\
+}
+#endif
 
 
 /********************************/
