@@ -16,8 +16,8 @@
 #include <sys/dispatch.h>
 #include <sys/neutrino.h>
 #include <sys/resmgr.h>
-
-// qcc stupid_resmgr.c -o stupid_resmgr -Wall -g
+#include <sys/trace.h>
+// qcc stupid_resmgr.c -o stupid_resmgr -Wall -g -L ~/mainline/stage/nto/x86_64/lib/
 
 
 #define failed(f, e) printf("%s: %s() failed: %s\n", __func__, #f, strerror(e))
@@ -119,6 +119,7 @@ static int init_resmgr(char *path, stupid_resmg_r *gl) {
     memset (&rattr, 0, sizeof (rattr));
     rattr.msg_max_size = sysconf(_SC_PAGESIZE);
 
+    trace_logf(1, "%s:", "resmgr_attach");
     if (resmgr_attach(gl->resmgr.dpp, &rattr, path, _FTYPE_ANY, gl->resmgr.attach_flags,
                     &gl->resmgr.connect_funcs, &gl->resmgr.io_funcs, attr) == -1 )
     {
