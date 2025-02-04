@@ -17,7 +17,7 @@
 #include <sys/neutrino.h>
 #include <sys/resmgr.h>
 #include <sys/trace.h>
-// qcc stupid_resmgr.c -o stupid_resmgr -Wall -g -L ~/mainline/stage/nto/x86_64/lib/
+// qcc stupid_resmgr.c -o stupid_resmgr -Wall -g -L ~/mainline/stage/nto/x86_64/lib/ -I ~/mainline/stage/nto/usr/include/
 
 
 #define failed(f, e) printf("%s: %s() failed: %s\n", __func__, #f, strerror(e))
@@ -147,7 +147,7 @@ static int init_resmgr(char *path, stupid_resmg_r *gl) {
 static int get_opts(int argc, char **argv, stupid_resmg_r *gl) {
     int result = 0;
     while (optind < argc) {
-        int c = getopt(argc, argv, "d");
+        int c = getopt(argc, argv, "dx");
 
         if (c == -1) {
             break;
@@ -156,6 +156,9 @@ static int get_opts(int argc, char **argv, stupid_resmg_r *gl) {
         switch (c) {
             case 'd':
                 gl->resmgr.attach_flags |= _RESMGR_FLAG_DIR;
+                break;
+            case 'x':
+                gl->resmgr.attach_flags |= _RESMGR_FLAG_EXCLUSIVE;
                 break;
             case 'h':
                 print_usage();
@@ -177,6 +180,7 @@ static int get_opts(int argc, char **argv, stupid_resmg_r *gl) {
 static void print_usage() {
     printf("stupid_resmgr [-d] <path>\n");
     printf("\t-d    attach directoy resmgr\n");
+    printf("\t-x    attach exclusive\n");
     printf("\t-h    print help message\n");
     printf("\t<path> resgmr path to create. Default /dev/stupid\n");
 }
