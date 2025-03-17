@@ -24,20 +24,23 @@
 // #include <assert.h>
 #include <fcntl.h>
 // #include <sys/memmsg.h>
-// #include <sys/procmsg.h>
+#include <sys/procmsg.h>
 #include <sys/procfs.h>
 #include <sys/trace.h>
 
 //build: qcc test_breakpoint_after_fork.c -o test_breakpoint_after_fork_x86_64 -Wall -g
+//build: ntoaarch64-gcc test_breakpoint_after_fork.c -o test_breakpoint_after_fork_aarch64 -Wall -g  
 
 /** 
  * @brief Checks if breakpint can be set in a child process.
  * The test program aka debugger creates a child and stops it via debug interface. 
- * Register for the fork event.
- * Let the child continue. The child forks a grand child. The debugger should
- * receive the fork event. Set a breakpoint in the grand child , continue the
- * grand child and check if the breakpoint event for the grand child is received.
- * ASLR muts be turned off.
+ * Register for the fork event. Sets a bp in a function only the grand child will reach.
+ * Let the child continue. The child forks a grand child. The brekapoints are copied from
+ * child to grand child and should be explicetetly removed by the kernel (this is the behaviour under test)
+ * The debugger should receive the fork event. Register for grand child notifications and continue.
+ * Check if the breakpoint event for the grand child is received. If yes, the test fails, if not it
+ * Passes
+ * ASLR must be turned off.
  * 
  * */
 
@@ -46,7 +49,7 @@
 #define usleep_ms(t) usleep((t*1000UL))
 int continue_proc(int fd);
 int stop_proc(int fd);
-int install_notification(int fd, int *chid, int offs);
+int install_notification(int fd, int *chid, int offs, int *coid);
 int get_proc_status(int fd, procfs_status *status);
 int recv_pulse_to(int chid, struct _pulse *pulse, unsigned to_ms);
 int set_break(int fd, void *addr);
@@ -90,6 +93,7 @@ int main(int argn, char* argv[]) {
         } else {
             printf(FAILED"Test Failed"ENDC"\n");
         }
+        printf("Wait for child %d\n", cpid);
         waitpid(cpid, 0, 0);
         break;
     }
@@ -124,11 +128,18 @@ int debugger(int cpid) {
         return -1;
     }
     
-    int chid;
+    int chid = -1, coid;
 
     // register event
-    if (install_notification(fd, &chid, 0) == -1) {
+    if (install_notification(fd, &chid, 0, &coid) == -1) {
         failed(install_notification, errno);
+        close(fd);
+        return -1;
+    }
+
+    /* set a breakpoint in the child. Assumption: ASLR ifs off */
+    if (set_break(fd, grand_child_func) != EOK) {
+        failed(set_break, errno);
         close(fd);
         return -1;
     }
@@ -166,8 +177,7 @@ int debugger(int cpid) {
     int gcfd;
 
     if (res == EOK) {
-        //status.what == grand child pid
-        sprintf(path, "/proc/%d/as", status.what);
+        sprintf(path, "/proc/%d/as", status.blocked.fork_event.child);
 
         gcfd = open(path, O_RDWR);
 
@@ -178,20 +188,20 @@ int debugger(int cpid) {
     }
 
     if (res == EOK) {
-        if (install_notification(gcfd, &chid, 1) == -1) {
+        if (install_notification(gcfd, &chid, 1, &coid) == -1) {
             failed(install_notification, errno);
             res = -1;
         }
     }
 
-    if (res == EOK) {
-        /* set a breakpoint in the grand child. Assumption: ASLR ifs off */
-        res = set_break(gcfd, grand_child_func);
+    // if (res == EOK) {
+    //     /* set a breakpoint in the grand child. Assumption: ASLR ifs off */
+    //     res = set_break(gcfd, grand_child_func);
 
-        if (res != EOK) {
-            failed(set_break, errno);
-        }
-    }
+    //     if (res != EOK) {
+    //         failed(set_break, errno);
+    //     }
+    // }
 
     if (gcfd != -1) {
         //let grand child continue
@@ -209,19 +219,32 @@ int debugger(int cpid) {
     if (res == EOK)
         trace_logf(42, "%s", "dbg: wait 4 grand child breakpoint");
 
-    while(res == EOK && status.why != _DEBUG_WHY_FAULTED) {
-        int res = recv_pulse_to(chid, &pulse, 1000);
+    while(res == EOK) {
+        res = recv_pulse_to(chid, &pulse, 1000);
+
         if (res == EOK) {
             if (pulse.code != (_PULSE_CODE_MINAVAIL + 1))
                 continue;
 
-            res = get_proc_status(fd, &status);
+            res = get_proc_status(gcfd, &status);
 
             if (res != EOK) {
                 failed(get_proc_status, errno);
+            } else {
+                if (status.why == _DEBUG_WHY_TERMINATED) {
+                    printf("Grand child terminated\n");
+                    break;
+                }
+                if (status.why == _DEBUG_WHY_FAULTED) {
+                    printf("Grand child faulted\n");
+                    res = -1;
+                    break;
+                }
             }
         } else {
-            printf("Didn't receive fork notification");
+            printf("Didn't receive break notification\n");
+            res = -1;
+            break;
         }
     }
 
@@ -232,6 +255,12 @@ int debugger(int cpid) {
             res = -1;
         }
         close(gcfd);
+    }
+
+    //continue child
+    if (continue_proc(fd) == -1) {
+        failed(continue_proc, errno);
+        res = -1;
     }
 
     close(fd);
@@ -308,7 +337,22 @@ int continue_proc(int fd) {
 
     memset( &run, 0, sizeof(run) );
 	run.flags |= _DEBUG_RUN_ARM;
-	run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
+	run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG | _DEBUG_RUN_CHILD | _DEBUG_RUN_FAULT;
+
+    if (run.flags & _DEBUG_RUN_FAULT) {
+	    sigemptyset((sigset_t *)&run.fault);
+	    sigaddset((sigset_t *)&run.fault, FLTILL);
+	    sigaddset((sigset_t *)&run.fault, FLTPRIV);
+	    sigaddset((sigset_t *)&run.fault, FLTBPT);
+	    sigaddset((sigset_t *)&run.fault, FLTTRACE);
+	    sigaddset((sigset_t *)&run.fault, FLTBOUNDS);
+	    sigaddset((sigset_t *)&run.fault, FLTIOVF);
+	    sigaddset((sigset_t *)&run.fault, FLTIZDIV);
+	    sigaddset((sigset_t *)&run.fault, FLTFPE);
+	    sigaddset((sigset_t *)&run.fault, FLTACCESS);
+	    sigaddset((sigset_t *)&run.fault, FLTSTACK);
+	    sigaddset((sigset_t *)&run.fault, FLTPAGE);
+    }
 
     int res = devctl(fd, DCMD_PROC_RUN, &run, sizeof(run), 0);
 	if (res != 0) {
@@ -322,21 +366,30 @@ int continue_proc(int fd) {
 /********************************/
 /* install_notification         */
 /********************************/
-int install_notification(int fd, int *chid, int offs) {
+int install_notification(int fd, int *chid, int offs, int *coid) {
     struct sigevent     event;
 
-    *chid = ChannelCreate(_NTO_CHF_DISCONNECT);
+    if ((*chid) == -1) {
+        *chid = ChannelCreate(_NTO_CHF_DISCONNECT);
 
-    if (*chid == -1) {
-        failed(ChannelCreate, errno);
-        return -1;
+        if (*chid == -1) {
+            failed(ChannelCreate, errno);
+            return -1;
+        }
+
+        *coid = ConnectAttach(0, 0, *chid, _NTO_SIDE_CHANNEL, 0);
+
+        if (*coid == -1) {
+            failed(ConnectAttach, errno);
+            return -1;
+        }
     }
 
-    SIGEV_PULSE_INIT(&event, *chid, SIGEV_PULSE_PRIO_INHERIT, _PULSE_CODE_MINAVAIL + offs, 42);
+    SIGEV_PULSE_INIT(&event, *coid, SIGEV_PULSE_PRIO_INHERIT, _PULSE_CODE_MINAVAIL + offs, 42);
 
     int res = EOK;
 
-    if (MsgRegisterEvent(&event, fd) == 0) {
+    if (MsgRegisterEvent(&event, PROCMGR_COID) == 0) {
         res = devctl( fd, DCMD_PROC_EVENT, &event, sizeof(event), NULL );
 
         if (res != EOK) {
