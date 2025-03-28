@@ -40,6 +40,7 @@ typedef enum coresight_type {
     TMC_ETB,
     TMC_ETR,
     TMC_ETF,
+    CTI
 } coresight_type_t;
 
 
@@ -51,6 +52,8 @@ typedef struct coresight_dev {
     off_t               phys;
     void*               v;
     size_t              size;
+    uint8_t             major;
+    uint8_t             sub;
 } coresight_dev_t;
 
 
@@ -112,7 +115,7 @@ range_t imx8mpm_ranges[] = {
     {.start = 0x28500000, .end = 0x2854ffff},
     {.start = 0x28600000, .end = 0x2864ffff},
     {.start = 0x28700000, .end = 0x2874ffff},
-    {.start = 0x28c00000, .end = 0x28c0ffff},
+    {.start = 0x28c00000, .end = 0x28cfffff},
     {.start = 0, .end = 0},
 };
 
@@ -180,9 +183,9 @@ range_t imx8mpm_ranges[] = {
 /* cstypetostr                  */
 /********************************/
 char *
-cstypetostr(coresight_type_t t) {
+cstypetostr(coresight_dev_t *dev) {
     static char typenamebuf[64];
-    switch (t) {
+    switch (dev->cs_type) {
     case TMC_ETB:
         snprintf(typenamebuf, sizeof(typenamebuf), stringify(TMC_ETB));
         break;
@@ -201,8 +204,11 @@ cstypetostr(coresight_type_t t) {
     case ETMvxx:
         snprintf(typenamebuf, sizeof(typenamebuf), stringify(ETMvxx));
         break;
+    case CTI:
+        snprintf(typenamebuf, sizeof(typenamebuf), stringify(CTI));
+        break;
     default:
-        snprintf(typenamebuf, sizeof(typenamebuf), "UNK");
+        snprintf(typenamebuf, sizeof(typenamebuf), "UNK major %hhu sub %hhu", dev->major, dev->sub);
         break;
     }
 
@@ -292,7 +298,6 @@ coresight_dev_t *detect_coresight_devs(range_t *ranges) {
                         const uint32_t devtype = readu32(v, CORESIGHT_DEVTYPE);
                         const unsigned major = BMVAL(devtype, 0, 3);
                         const unsigned sub = BMVAL(devtype, 4, 7);
-                        printf("m %u s %u\n", major, sub);
 
                         switch (major) {
                         case 1:
@@ -329,10 +334,16 @@ coresight_dev_t *detect_coresight_devs(range_t *ranges) {
                                 devs[devcount].cs_type = ETMvxx;
                             }
                             break;
+                        case 4:
+                            if (sub == 1) {
+                                devs[devcount].cs_type = CTI;
+                            }
                         }
 
                         devs[devcount].phys = p;
                         devs[devcount].size = CS_DEV_SIZE;
+                        devs[devcount].major = (uint8_t)major;
+                        devs[devcount].sub = (uint8_t)sub;
                         devcount++;
                     }
                 };
@@ -377,7 +388,7 @@ int main(int argn, char* argv[]) {
         coresight_dev_t *dev;
 
         for(dev = list_of_devs; dev->phys != 0; dev++) {
-            printf("%s at 0x%lx\n", cstypetostr(dev->cs_type), dev->phys);
+            printf("%s at 0x%lx\n", cstypetostr(dev), dev->phys);
         }
     }
 
