@@ -17,7 +17,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <sys/neutrino.h>
-// #include <pthread.h>
+#include <pthread.h>
 // #include <sys/resource.h>
 // #include <sys/mman.h>
 // #include <time.h>
@@ -30,8 +30,8 @@
 #include <spawn.h>
 #include <sys/siginfo.h>
 //build: 
-// ntoaarch64-gcc test_single_step_and_bp.c -o test_single_step_and_bp_aarch64 -g -Wall
-// ntox86_64-gcc test_single_step_and_bp.c -o test_single_step_and_bp_x86_64 -g -Wall 
+// ntoaarch64-gcc test_debug_two_threads.c -o test_debug_two_threads_aarch64 -g -Wall
+// ntox86_64-gcc test_debug_two_threads.c -o test_debug_two_threads_x86_64 -g -Wall 
  
 
 #define failed(f, e) fprintf(stderr, "%s:%d: %s() failed: %s\n", __func__, __LINE__, #f, strerror(e))
@@ -55,13 +55,16 @@ void init_run(procfs_run *prun);
 int register_event(int fd, struct sigevent *pevent);
 int devcl_set_breakpoint(const int fd, const uintptr_t addr);
 int devcl_rm_breakpoint(const int fd, const uintptr_t addr);
+int devctl_get_proc_info(const int fd, procfs_info *const info);
 
 int devctl_run_process(const int fd, procfs_run * run);
 int devctl_get_proc_status(const int fd, procfs_status *const status);
 void breakpoint(uint32_t u);
 int set_break_and_wait(int cpid, int fd, uintptr_t brk_addr, procfs_run *prun, sigset_t *pset);
+int devctl_switchto_thread(const int fd, unsigned tid);
+int devctl_get_thread_status(const int fd, unsigned tid, procfs_status *const status);
 
-void _start(void);
+
 
 /********************************/
 /* main							*/
@@ -108,7 +111,7 @@ int debugger(int *pcpid, char* argv[]) {
     
     // spawn the debuggee in state STOPPED
     posix_spawnattr_init(&attr);
-    posix_spawnattr_setxflags(&attr, POSIX_SPAWN_HOLD);
+    // posix_spawnattr_setxflags(&attr, POSIX_SPAWN_HOLD);
     posix_spawnattr_setaslr(&attr, POSIX_SPAWN_ASLR_DISABLE);
 
     if (posix_spawn(&cpid, argv[0], NULL, &attr, __argv, NULL) == -1) {
@@ -118,7 +121,8 @@ int debugger(int *pcpid, char* argv[]) {
 
     *pcpid = cpid;
 
-    // attach to debuggee
+    // let the debuggee come up, then attach
+    usleep_ms(200);
     char buffer[64];
     sprintf(buffer, "/proc/%d/as", cpid);
 
@@ -129,23 +133,28 @@ int debugger(int *pcpid, char* argv[]) {
         return -1;
     }
 
-    //debug stop the debuggee and let
-    //continue at the next run
+    //debug stop the debuggee
     int rc = devctl(fd, DCMD_PROC_STOP, 0, 0, 0 );
     if (rc != EOK) {
         failed(DCMD_PROC_STOP, rc);
         return -1;
     }
     
-    if (kill(cpid, SIGCONT) == -1) {
-        failed(kill, errno);
+    procfs_info pinfo;
+
+    if (devctl_get_proc_info(fd, &pinfo) == -1) {
         return -1;
     }
 
-    procfs_status status;
+    if (pinfo.num_threads != 3) {
+        printf("invalid number of threads\n");
+        return -1;
+    }
+
+    // procfs_status status;
     struct sigevent event;
     procfs_run run;
-    siginfo_t info;
+    // siginfo_t info;
     sigset_t set;
 
     sigemptyset( &set );
@@ -160,47 +169,39 @@ int debugger(int *pcpid, char* argv[]) {
     event.sigev_value.sival_int = cpid;
     init_run(&run);
 
-    /* test if breakpoint at _start is hit */
-    // ASLR  ust be turned off for the debugger, otherwise _start in the debugger 
-    // is not equal to _start in the debuggee
-    if (set_break_and_wait(cpid, fd, (uintptr_t)_start, &run, &set) != EOK) {
-        test_failed;
+    if (devctl_switchto_thread(fd, 2)!= EOK) {
         return -1;
-
     }
 
-    /* stop at breakpoint() */
+    /* stop at breakpoint() in thread 2*/
     if (set_break_and_wait(cpid, fd, (uintptr_t)breakpoint, &run, &set) != EOK) {
         test_failed;
         return -1;
 
     }
 
-    /* single step */
-    run.flags |= _DEBUG_RUN_STEP;
-    //continue process
-    if (devctl_run_process(fd, &run) == -1) {
+    procfs_status t3;
+
+    if (devctl_get_thread_status(fd, 3, &t3) != EOK) {
         return -1;
     }
 
-    //wait for debug event
-    sigwaitinfo(&set, &info);
+    uintptr_t t3ip = t3.ip;
 
-    if (devctl_get_proc_status(fd, &status) == -1) {
-        return -1;
-    }
+    for (unsigned u = 0; u < 10; u++) {
+        if (set_break_and_wait(cpid, fd, (uintptr_t)breakpoint, &run, &set) != EOK) {
+            test_failed;
+            return -1;
 
-    if (status.ip <= (uintptr_t)breakpoint || (status.flags & _DEBUG_FLAG_SSTEP) == 0) {
-        test_failed;
-        return -1;
-    }
-   
-    /* stop at breakpoint() again */
-    run.flags &= ~_DEBUG_RUN_STEP;
-    if (set_break_and_wait(cpid, fd, (uintptr_t)breakpoint, &run, &set) != EOK) {
-        test_failed;
-        return -1;
+        }
 
+        if (devctl_get_thread_status(fd, 3, &t3) != EOK) {
+            return -1;
+        }
+
+        if (t3.ip == t3ip) {
+            test_failed;
+        }
     }
 
     //continue process
@@ -296,6 +297,12 @@ void init_run(procfs_run *prun) {
 
 }
 
+void *t1(void *arg);
+void *t2(void *arg);
+void sigint_handler(int signal);
+
+bool stopit = false;
+
 static volatile uint32_t x;
 /********************************/
 /* breakpoint                   */
@@ -308,11 +315,76 @@ void breakpoint(uint32_t u) {
 /* debuggee                     */
 /********************************/
 int debuggee() {
-    for (unsigned u = 0; u < 2; u++) {
-        breakpoint(u);
+    signal(SIGINT, sigint_handler);
+    
+    pthread_t tids[2];
+    int ret = pthread_create(&tids[0], NULL, t1, NULL);
+    if (ret != EOK) {
+        failed(pthread_create, errno);
+        return EXIT_FAILURE;
+    }
+
+    ret = pthread_create(&tids[1], NULL, t2, NULL);
+    if (ret != EOK) {
+        failed(pthread_create, errno);
+        return EXIT_FAILURE;
+    }
+
+    void *t1_res;
+    pthread_join(tids[0], &t1_res);
+    pthread_join(tids[1], NULL);
+
+    switch (*((long*)t1))
+    {
+    case -1:
+        printf("Test ABORT\n");
+        break;
+    case 0:
+        printf("Test SUCCESS\n");
+        break;
+    default:
+        printf("Test FAILED\n");
+        break;
     }
 
     return EOK;
+}
+
+
+/********************************/
+/* t1                           */
+/********************************/
+void *t1(void *arg) {
+    while (!stopit)
+    {
+        printf("%s running\n", __func__);
+        breakpoint(1);
+        usleep(1000000);
+    }
+    
+    return NULL;
+}
+
+/********************************/
+/* t2                           */
+/********************************/
+void *t2(void *arg) {
+
+    while (!stopit)
+    {
+        printf("%s running\n", __func__);
+        breakpoint(2);
+        usleep(500000);
+    }    
+
+    return NULL;
+}
+
+/********************************/
+/* sigint_handler               */
+/********************************/
+void sigint_handler(int signal) {
+    stopit = true;
 }
 
 
@@ -380,5 +452,51 @@ int devctl_get_proc_status(const int fd, procfs_status *const status)
         return -1;
     }
 
+    return EOK;
+}
+
+
+
+/********************************/
+/* devctl_get_thread_status      */
+/********************************/
+int devctl_get_thread_status(const int fd, unsigned tid, procfs_status *const status)
+{
+    status->tid = tid;
+
+    int rc = devctl( fd, DCMD_PROC_TIDSTATUS, status, sizeof(procfs_status), 0 );
+    if (rc) {
+        failed(DCMD_PROC_TIDSTATUS, rc);
+        return -1;
+    }
+
+    return EOK;
+}
+
+
+
+/********************************/
+/* devctl_get_proc_info         */
+/********************************/
+int devctl_get_proc_info(const int fd, procfs_info *const info)
+{
+    int rc = devctl( fd, DCMD_PROC_INFO, info, sizeof(procfs_info), 0 );
+    if (rc) {
+        failed(DCMD_PROC_INFO, rc);
+        return -1;
+    }
+
+    return EOK;
+}
+
+// Make sure to switch to the target
+// process's main thread.
+int devctl_switchto_thread(const int fd, unsigned tid)
+{
+    int rc = devctl( fd, DCMD_PROC_CURTHREAD, &tid, sizeof tid, 0 );
+    if (rc) {
+        failed(DCMD_PROC_CURTHREAD, errno);
+        return -1;
+    }
     return EOK;
 }
