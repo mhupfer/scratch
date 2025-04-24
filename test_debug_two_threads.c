@@ -20,7 +20,7 @@
 #include <pthread.h>
 // #include <sys/resource.h>
 // #include <sys/mman.h>
-// #include <time.h>
+#include <time.h>
 // #include <assert.h>
 #include <fcntl.h>
 // #include <sys/memmsg.h>
@@ -60,6 +60,7 @@ int devctl_get_proc_info(const int fd, procfs_info *const info);
 int devctl_run_process(const int fd, procfs_run * run);
 int devctl_get_proc_status(const int fd, procfs_status *const status);
 void breakpoint(uint32_t u);
+void breakpoint_t3(uint32_t u);
 int set_break_and_wait(int cpid, int fd, uintptr_t brk_addr, procfs_run *prun, sigset_t *pset);
 int devctl_switchto_thread(const int fd, unsigned tid);
 int devctl_get_thread_status(const int fd, unsigned tid, procfs_status *const status);
@@ -151,7 +152,7 @@ int debugger(int *pcpid, char* argv[]) {
         return -1;
     }
 
-    // procfs_status status;
+    procfs_status status;
     struct sigevent event;
     procfs_run run;
     // siginfo_t info;
@@ -173,36 +174,43 @@ int debugger(int *pcpid, char* argv[]) {
         return -1;
     }
 
-    /* stop at breakpoint() in thread 2*/
+    /* 
+        stop thread 2 at breakpoint() 
+        determine the ip of thread 3
+        continue
+        check if t3 did move
+    */
     if (set_break_and_wait(cpid, fd, (uintptr_t)breakpoint, &run, &set) != EOK) {
         test_failed;
         return -1;
 
     }
 
-    procfs_status t3;
-
-    if (devctl_get_thread_status(fd, 3, &t3) != EOK) {
+    if (devctl_get_thread_status(fd, 3, &status) != EOK) {
         return -1;
     }
 
-    uintptr_t t3ip = t3.ip;
-
-    for (unsigned u = 0; u < 10; u++) {
+    uintptr_t t3_ip = status.ip;
+    printf("Test start\n");
+    for (unsigned u = 0; u < 5; u++) {
         if (set_break_and_wait(cpid, fd, (uintptr_t)breakpoint, &run, &set) != EOK) {
             test_failed;
             return -1;
 
         }
 
-        if (devctl_get_thread_status(fd, 3, &t3) != EOK) {
+        if (devctl_get_thread_status(fd, 3, &status) != EOK) {
             return -1;
         }
 
-        if (t3.ip == t3ip) {
+        if (status.ip == t3_ip) {
             test_failed;
         }
     }
+
+    printf("Test end\n");
+    printf("Press key to continue\n");
+    char c = getc(stdin);
 
     //continue process
     if (devctl_run_process(fd, &run) == -1) {
@@ -210,6 +218,14 @@ int debugger(int *pcpid, char* argv[]) {
     }
 
     close(fd);
+
+    if (kill(cpid, SIGINT) == -1) {
+        failed(kill, errno);
+    }    
+
+    if (kill(cpid, SIGTERM) == -1) {
+        failed(kill, errno);
+    }    
 
     return 0;
 }
@@ -297,19 +313,13 @@ void init_run(procfs_run *prun) {
 
 }
 
-void *t1(void *arg);
 void *t2(void *arg);
+void *t3(void *arg);
 void sigint_handler(int signal);
 
 bool stopit = false;
 
 static volatile uint32_t x;
-/********************************/
-/* breakpoint                   */
-/********************************/
-void breakpoint(uint32_t u) {
-    x = u;
-}
 
 /********************************/
 /* debuggee                     */
@@ -318,23 +328,23 @@ int debuggee() {
     signal(SIGINT, sigint_handler);
     
     pthread_t tids[2];
-    int ret = pthread_create(&tids[0], NULL, t1, NULL);
+    int ret = pthread_create(&tids[0], NULL, t2, NULL);
     if (ret != EOK) {
         failed(pthread_create, errno);
         return EXIT_FAILURE;
     }
 
-    ret = pthread_create(&tids[1], NULL, t2, NULL);
+    ret = pthread_create(&tids[1], NULL, t3, NULL);
     if (ret != EOK) {
         failed(pthread_create, errno);
         return EXIT_FAILURE;
     }
 
-    void *t1_res;
-    pthread_join(tids[0], &t1_res);
+    void *t2_res;
+    pthread_join(tids[0], &t2_res);
     pthread_join(tids[1], NULL);
 
-    switch (*((long*)t1))
+    switch (*((long*)t2_res))
     {
     case -1:
         printf("Test ABORT\n");
@@ -354,31 +364,48 @@ int debuggee() {
 /********************************/
 /* t1                           */
 /********************************/
-void *t1(void *arg) {
+void *t2(void *arg) {
     while (!stopit)
     {
         printf("%s running\n", __func__);
-        breakpoint(1);
-        usleep(1000000);
+        breakpoint(2);
+        usleep_ms(1000);
     }
     
     return NULL;
 }
 
 /********************************/
-/* t2                           */
+/* t3                           */
 /********************************/
-void *t2(void *arg) {
+void *t3(void *arg) {
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t t0 = timespec2nsec(&ts);
 
     while (!stopit)
     {
-        printf("%s running\n", __func__);
-        breakpoint(2);
-        usleep(500000);
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t t1 = timespec2nsec(&ts);
+        if (t1 - t0 > 500000000) {
+            printf("%s running\n", __func__);
+            t0 = t1;
+        }
+        //usleep(100);
     }    
 
     return NULL;
 }
+
+
+/********************************/
+/* breakpoint                   */
+/********************************/
+void breakpoint(uint32_t u) {
+    x = u;
+}
+
 
 /********************************/
 /* sigint_handler               */
