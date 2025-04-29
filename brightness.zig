@@ -6,7 +6,7 @@ const libc = @cImport({
     @cInclude("unistd.h");
     @cInclude("string.h");
 });
-// build zig build-exe brightness.zig
+// build zig build-exe brightness.zig -lc
 
 //|-----------------|
 //| main            |
