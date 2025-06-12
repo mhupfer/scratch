@@ -47,10 +47,41 @@
 #endif
 
 
+
 /********************************/
 /* main							*/
 /********************************/
 int main(int argc, char* argv[]) {
     // printf(PASSED"Test PASS"ENDC"\n");
-    return EXIT_SUCCESS;
+    uint64_t    result;
+    uint64_t    op1;
+    int64_t     op2;
+
+    op1 = INT64_MAX;
+    op2 = 15;
+	if (__builtin_add_overflow(op1, op2, &result)) {
+        failed(__builtin_add_overflow, EOVERFLOW);
+    }
+    printf("%lu + %ld = %lu (%ld)\n", op1, op2, result, (int64_t)result);
+
+    op1 = 60;
+    op2 = -15;
+	if (__builtin_add_overflow(op1, op2, &result)) {
+        failed(__builtin_add_overflow, EOVERFLOW);
+    }
+    printf("%lu + %ld = %lu (%ld)\n", op1, op2, result, (int64_t)result);
+
+    op1 = 15;
+    op2 = -30;
+	if (__builtin_add_overflow(op1, op2, &result)) {
+        failed(__builtin_add_overflow, EOVERFLOW);
+    }
+    printf("%lu + %ld = %lu (%ld)\n", op1, op2, result, (int64_t)result);
+
+    op1 = (uint64_t)INT64_MAX + 10;
+    op2 = INT64_MAX ;
+	if (__builtin_add_overflow(op1, op2, &result)) {
+        failed(__builtin_add_overflow, EOVERFLOW);
+    }
+    printf("%lu + %ld = %lu (%ld)\n", op1, op2, result, (int64_t)result);
 }
