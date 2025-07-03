@@ -154,10 +154,6 @@ int main(int argc, char **argv) {
         // continue_proc(fd);
         //detach debugger
         close(fd);
-
-        // usleep(1000000000);
-        // printf("Closing debugger\n");
-        //close(fd);
     } else {
         perror("open failed: ");
     }
