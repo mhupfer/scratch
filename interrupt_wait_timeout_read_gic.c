@@ -31,9 +31,11 @@
 #include <stdint.h>
 
 // Put in the base address of the Arm GICv2 of your SoC
-#define GICD_BASE       0x08000000UL       // GIC Distributor Base für QEMU virt
+#define QEMU_GICD_BASE       0x08000000UL       // GIC Distributor Base für QEMU virt
 #define GICD_ISPENDR(n) (*(volatile uint32_t*)(distr_base + 0x200 + ((n) * 4)))
 #define GICD_ISENABLER(n)     (*(volatile uint32_t*)(distr_base + 0x100 + ((n) * 4)))
+
+off_t PHYS_GICD_BASE = QEMU_GICD_BASE;
 
 /********************************/
 /* dump_gic                     */
@@ -42,7 +44,8 @@ int dump_gic(uint32_t irq_id) {
     static void *distr_base = NULL;
 
     if (distr_base == NULL) {
-        distr_base = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_PHYS, NOFD, GICD_BASE);
+        printf("PHYS_GICD_BASE=0x%lx\n", PHYS_GICD_BASE);
+        distr_base = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_PHYS, NOFD, PHYS_GICD_BASE);
     }
 
     if (distr_base == MAP_FAILED) {
@@ -68,6 +71,12 @@ int dump_gic(uint32_t irq_id) {
 int
 main(int argc, char *argv[]) {
     struct sigevent ev;
+
+    if (argv[1]) {
+        if (strncmp(argv[1], "GICD_BASE=", 10) == 0) {
+            PHYS_GICD_BASE = strtoul(&argv[1][10], NULL, 0);
+        }
+    }
 
     SIGEV_INTR_INIT(&ev);
 

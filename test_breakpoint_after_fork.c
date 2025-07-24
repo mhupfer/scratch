@@ -276,7 +276,7 @@ int child() {
     // give the debugger time to attach
     usleep_ms(500);
 
-    trace_logf(42, "%s", "child: fork grand child child");
+    trace_logf(42, "%s", "child: fork grand child");
     int gcpid = fork();
 
     switch (gcpid)
