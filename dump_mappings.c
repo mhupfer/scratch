@@ -24,12 +24,12 @@
 // #include <assert.h>
 //#include <fcntl.h>
 #include <sys/memmsg.h>
-// #include <sys/procmsg.h>
+#include <sys/procmsg.h>
 // #include <sys/procfs.h>
 //#include <sys/trace.h>
 //#include <spawn.h>
 
-//build: 
+//build: ntoaarch64-gcc dump_mappings.c  -o dump_mappings -Wall -g -I ~/mainline/stage/nto/usr/include/
 
 #define failed(f, e) fprintf(stderr, "%s:%d: %s() failed: %s\n", __func__, __LINE__, #f, strerror(e))
 
@@ -50,13 +50,26 @@ int introspec_get_all_ranges(pid64_t pid64, mem_map_info_t **data, int *no_of_re
 int introspec_get_all_regions(pid64_t pid64, mem_map_info_t **data, int *no_of_records);
 static long introspec_mapinfo(uint16_t submsg, pid64_t pid64, uintptr_t startaddr, uintptr_t endaddr, mem_map_info_t *buffer, size_t bsize);
 static void dump_mapinfo (mem_map_info_t *mmi);
-
+int get_process_name(pid64_t const pid, char * const buffer, size_t const bsize);
 
 /********************************/
 /* main							*/
 /********************************/
 int main(int argc, char* argv[]) {
     pid_t pid = getpid();
+
+    if (argc > 1) {
+        pid = atoi(argv[1]);
+    }
+
+    char pname[256];
+
+    if (get_process_name(pid, pname, 256) == -1) {
+        failed(get_process_name, 0);
+        return EXIT_FAILURE;
+    }
+
+    printf("Process %s pid %d\n", pname, pid);
 
     mem_map_info_t *regions;
     int no_of_regions;
@@ -183,3 +196,15 @@ static long introspec_mapinfo(uint16_t submsg, pid64_t pid64, uintptr_t startadd
 
 }
 
+/********************************/
+/* get_process_name             */
+/********************************/
+int get_process_name(pid64_t const pid, char * const buffer, size_t const bsize) {
+
+    struct _proc_getname i = {
+        .type = _PROC_GETNAME,
+        .pid = pid
+    };
+
+    return (int)MsgSend_r(PROCMGR_COID, &i, sizeof(i), (void *)buffer, bsize);
+}
