@@ -51,7 +51,7 @@
 #endif
 
 #define error_msg "get_proc_info() failed: No such process"
-#define note "fsync() error:Invalid argument"
+#define note_msg "fsync() error:Invalid argument"
 #define info_msg "run fault pid"
 #define dbg_msg "dumping to /dev/shmem/"
 
@@ -177,6 +177,66 @@ pid64_t * get_all_pids() {
 }
 
 /********************************/
+/* CHECKMSG                     */
+/********************************/
+#define CHECKMSG(var, msg) ptr = strstr(output, msg);\
+        if (var && !ptr) {\
+            return false;\
+        }\
+\
+        if (!var && ptr) {\
+            return false;\
+        }
+
+/********************************/
+/* check_output                 */
+/********************************/
+bool check_output(char *output, bool nothing, bool err, bool note, bool info, bool dbg) {
+    char *ptr;
+
+    if (nothing) {
+        return output == NULL;
+    } else {
+        if (output == NULL) {
+            return false;
+        }
+
+        CHECKMSG(err, error_msg);
+        CHECKMSG(note, note_msg);
+        CHECKMSG(info, info_msg);
+        CHECKMSG(dbg, dbg_msg);
+    }
+
+    return true;
+}
+
+/********************************/
+/* check_slog                   */
+/********************************/
+bool check_slog(bool nothing, bool err, bool note, bool info, bool dbg) {
+    char *slog2_args[] = {"/proc/boot/slog2info", "-b", "dumper", NULL}; 
+    pipe_t slout,slerr;
+
+    pid_t slpid = launch_process(slog2_args, &slout, &slerr);
+
+    if (slpid < 0) {
+        failed(launch_process, errno);
+        exit(EXIT_FAILURE);
+    }
+
+    mssleep(8);
+    char *output = read_pipe(&slout);
+
+    bool result = check_output(output, nothing, err, note, info, dbg);
+
+    free(output);
+    close_pipe(&slout);
+    close_pipe(&slerr);
+
+    return result;
+}
+
+/********************************/
 /* test_error_daemon            */
 /********************************/
 void test_error_daemon() {
@@ -198,7 +258,6 @@ void test_error_daemon() {
     //clear slog
     system("slog2info -c > /dev/null");
 
-
     int procfd = open("/proc/dumper", O_RDWR);
 
     if (procfd == -1) {
@@ -215,46 +274,12 @@ void test_error_daemon() {
     //     return EXIT_FAILURE;
     // }
 
-    char *slog2_args[] = {"/proc/boot/slog2info", "-b", "dumper", NULL}; 
-    pipe_t slout,slerr;
-
-    pid_t slpid = launch_process(slog2_args, &slout, &slerr);
-
-    if (slpid < 0) {
-        failed(launch_process, errno);
-        exit(EXIT_FAILURE);
-    }
-
-    mssleep(8);
-    char *output = read_pipe(&slout);
-
-    if (output == NULL) {
+    if (!check_slog(false, true, false, false, false)) {
         test_failed;
     }
 
-    if (strstr(output, error_msg) == NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, note) != NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, info_msg) != NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, dbg_msg) != NULL) {
-        test_failed;
-    }
-
-    free(output);
-    close_pipe(&slout);
-    close_pipe(&slerr);
-
-
-    output = read_pipe(&dout);
-    if (output != NULL) {
+    char *output = read_pipe(&dout);
+    if (!check_output(output, true, false, false, false, false)) {
         test_failed;
     }
 
@@ -281,6 +306,9 @@ void test_error_no_daemon() {
     pipe_t dout, derr;
     pid_t pid;
 
+    //clear slog
+    system("slog2info -c > /dev/null");
+
     char *dumper_args[] = {"/system/bin/dumper", "-d", "/dev/shmem", "-p", "55555", NULL};
 
     pid = launch_process(dumper_args, &dout, &derr);
@@ -291,26 +319,13 @@ void test_error_no_daemon() {
     }
 
 
-    mssleep(8);
+    if (!check_slog(true, false, false, false, false)) {
+        test_failed;
+    }
+
     char *output = read_pipe(&derr);
 
-    if (output == NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, error_msg) == NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, note) != NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, info_msg) != NULL) {
-        test_failed;
-    }
-
-    if (strstr(output, dbg_msg) != NULL) {
+    if (!check_output(output, false, true, false, false, false)) {
         test_failed;
     }
 
@@ -334,8 +349,8 @@ void test_error_no_daemon() {
 int main(int argc, char* argv[]) {
     /*
         Dumper can write to slog2 (daemon mode) or stderr
+        The output should be either in slog or on console, not both
         It supports different verbosity levels
-        debug prints always go to stdout
     */
 
     pid64_t * pidlist = get_all_pids();
