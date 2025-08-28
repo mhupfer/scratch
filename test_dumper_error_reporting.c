@@ -237,16 +237,16 @@ bool check_slog(bool nothing, bool err, bool note, bool info, bool dbg) {
 }
 
 /********************************/
-/* test_error_daemon            */
+/* test_daemon_mode             */
 /********************************/
-void test_error_daemon() {
+void test_daemon_mode(char *target_process, char *verbosity, bool nothing, bool err, bool note, bool info, bool dbg) {
     // terminate running dumpers
     system("slay -f dumper");
 
     pipe_t dout, derr;
     pid_t pid;
 
-    char *dumper_args[] = {"/system/bin/dumper", "-a", "-d", "/dev/shmem", NULL};
+    char *dumper_args[] = {"/system/bin/dumper", "-a", "-d", "/dev/shmem", verbosity, NULL};
 
     pid = launch_process(dumper_args, &dout, &derr);
 
@@ -265,25 +265,30 @@ void test_error_daemon() {
         exit(EXIT_FAILURE);
     }
 
-    char invalid_pid[] = "5555555\n";
+    //wrtie can fail if target process doesn't exist -> omit check
+    write(procfd, target_process, strlen(target_process));
 
-    write(procfd, invalid_pid, strlen(invalid_pid));
-
-    // if (write(procfd, invalid_pid, strlen(invalid_pid)) != -1) {
-    //     failed(write, errno);
-    //     return EXIT_FAILURE;
-    // }
-
-    if (!check_slog(false, true, false, false, false)) {
-        test_failed;
-    }
-
-    char *output = read_pipe(&dout);
-    if (!check_output(output, true, false, false, false, false)) {
+    //check slog according to parameters
+    if (!check_slog(nothing, err, note, info, dbg)) {
         test_failed;
     }
 
     close(procfd);
+
+    //stdout should be empty
+    char *output = read_pipe(&dout);
+    if (!check_output(output, true, false, false, false, false)) {
+        test_failed;
+    }
+    free(output);
+
+    //stderr should be empty
+    output = read_pipe(&derr);
+    if (!check_output(output, true, false, false, false, false)) {
+        test_failed;
+    }
+    free(output);
+
 
     if (kill(pid, SIGTERM) == -1) {
         failed(kill, errno);
@@ -297,9 +302,9 @@ void test_error_daemon() {
 
 
 /********************************/
-/* test_error_daemon            */
+/* test_no_daemon_mode          */
 /********************************/
-void test_error_no_daemon() {
+void test_no_daemon_mode(char *target_process, char *verbosity, bool nothing, bool err, bool note, bool info, bool dbg) {
     // terminate running dumpers
     system("slay -f dumper");
 
@@ -309,7 +314,7 @@ void test_error_no_daemon() {
     //clear slog
     system("slog2info -c > /dev/null");
 
-    char *dumper_args[] = {"/system/bin/dumper", "-d", "/dev/shmem", "-p", "55555", NULL};
+    char *dumper_args[] = {"/system/bin/dumper", "-d", "/dev/shmem", "-p", target_process, verbosity, NULL};
 
     pid = launch_process(dumper_args, &dout, &derr);
 
@@ -318,18 +323,31 @@ void test_error_no_daemon() {
         exit(EXIT_FAILURE);
     }
 
+    mssleep(8);
 
+    // slog must be empty
     if (!check_slog(true, false, false, false, false)) {
         test_failed;
     }
 
     char *output = read_pipe(&derr);
 
-    if (!check_output(output, false, true, false, false, false)) {
+    if (!check_output(output, nothing, err, note, info, false)) {
         test_failed;
     }
 
     free(output);
+
+    if (dbg) {
+        //debug messages are routed to stdout
+        char *output = read_pipe(&dout);
+
+        if (!check_output(output, false, false, false, false, true)) {
+            test_failed;
+        }
+
+        free(output);
+    }
 
     if (kill(pid, SIGTERM) == -1) {
         failed(kill, errno);
@@ -365,8 +383,31 @@ int main(int argc, char* argv[]) {
     snprintf(target_pid, sizeof(target_pid), "%u\n", (uint32_t)pidlist[3]);
     free(pidlist);
 
-    test_error_daemon();
-    test_error_no_daemon();
+    // no printouts
+    printf("Test case: no printout\n");
+    test_daemon_mode(target_pid, NULL, true, false, false, false, false);
+    test_no_daemon_mode(target_pid, NULL, true, false, false, false, false);
+
+    //expect an error msg
+    printf("Test case: error msg\n");
+    char invalid_pid[] = "5555555\n";
+    test_daemon_mode(invalid_pid, NULL, false, true, false, false, false);
+    test_no_daemon_mode(invalid_pid, NULL, false, true, false, false, false);
+
+    //error + note
+    printf("Test case: error + note\n");
+    test_daemon_mode(target_pid, "-v", false, false, true, false, false);
+    test_no_daemon_mode(target_pid, "-v", false, false, true, false, false);
+
+    //error + note + info
+    printf("Test case: error + note + info\n");
+    test_daemon_mode(target_pid, "-vv", false, false, true, true, false);
+    test_no_daemon_mode(target_pid, "-vv", false, false, true, true, false);
+
+    //error + note + info + dbg
+    printf("Test case: error + note + info + dbg\n");
+    test_daemon_mode(target_pid, "-vvv", false, false, true, true, true);
+    test_no_daemon_mode(target_pid, "-vvv", false, false, true, true, true);
 
     printf(PASSED"Test PASS"ENDC"\n");
     return EXIT_SUCCESS;
