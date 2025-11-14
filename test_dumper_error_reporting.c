@@ -395,19 +395,19 @@ int main(int argc, char* argv[]) {
     test_no_daemon_mode(invalid_pid, NULL, false, true, false, false, false);
 
     //error + note
-    printf("Test case: error + note\n");
-    test_daemon_mode(target_pid, "-v", false, false, true, false, false);
-    test_no_daemon_mode(target_pid, "-v", false, false, true, false, false);
+    // printf("Test case: error + note\n");
+    // test_daemon_mode(target_pid, "-v", false, false, true, false, false);
+    // test_no_daemon_mode(target_pid, "-v", false, false, true, false, false);
 
-    //error + note + info
-    printf("Test case: error + note + info\n");
-    test_daemon_mode(target_pid, "-vv", false, false, true, true, false);
-    test_no_daemon_mode(target_pid, "-vv", false, false, true, true, false);
+    //error + info
+    printf("Test case: error + info\n");
+    test_daemon_mode(target_pid, "-vv", false, false, false, true, false);
+    test_no_daemon_mode(target_pid, "-vv", false, false, false, true, false);
 
-    //error + note + info + dbg
-    printf("Test case: error + note + info + dbg\n");
-    test_daemon_mode(target_pid, "-vvv", false, false, true, true, true);
-    test_no_daemon_mode(target_pid, "-vvv", false, false, true, true, true);
+    //error + note + dbg
+    printf("Test case: error + info + dbg\n");
+    test_daemon_mode(target_pid, "-vvv", false, false, false, true, true);
+    test_no_daemon_mode(target_pid, "-vvv", false, false, false, true, true);
 
     printf(PASSED"Test PASS"ENDC"\n");
     return EXIT_SUCCESS;

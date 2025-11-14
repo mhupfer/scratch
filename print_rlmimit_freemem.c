@@ -30,6 +30,8 @@ void threaded_test_init();
 int main(int argn, char* argv[]) {
 	struct rlimit 			rl;
 
+	printf("sizeof(long long)=%u\n", sizeof(long long));
+
 	/* check rlimit == unlimited */
 	if (getrlimit(RLIMIT_FREEMEM, &rl) != 0) {
 		failed(getrlimit, errno);
