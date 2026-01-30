@@ -264,6 +264,52 @@ main(int argc, char *argv[]) {
         }
     }
 
+    if (my_config.testcase_num == 4) {
+        /**
+         * dup-by-fork test
+         */
+        srand(time(NULL));
+        
+        for (uint64_t u = 0; u < my_config.loops; u++) {
+            sem_t *sem2 = sem_open("testing123", O_CREAT, S_IRWXU, 0);
+            if (sem2 == SEM_FAILED) {
+                puts("fail sem_open2\n");
+                break;
+            };
+            
+            int cpid = fork();
+            
+            switch (cpid) {
+                case -1:
+                failed(fork, errno);
+                return EXIT_FAILURE;
+                break;
+            case 0: {
+                    /* child */
+                    struct _fdinfo fdinfo;
+                    char path[512];
+                    
+                    if (iofdinfo(sem2->__u.__fd, _FDINFO_FLAG_LOCALPATH, &fdinfo, path,
+                                 sizeof(path)) == -1) {
+                        failed(iofdinfo, errno);
+                    } else {
+                        printf("fd %d path %s\n", sem2->__u.__fd, path);
+                    }
+
+                    sem_close(sem2);
+                    return EXIT_SUCCESS;
+                }
+            default:
+                /* parent */
+                usleep((rand() % 401));
+                sem_unlink("testing123");
+                sem_close(sem2);
+                waitpid(cpid, NULL, 0);
+                break;
+            }
+        }
+    }
+
     printf(PASSED"Test PASS"ENDC"\n");
     return EXIT_SUCCESS;
 }

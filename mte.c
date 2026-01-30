@@ -142,7 +142,7 @@ void *create_tagged_ptr(void *untagged, size_t size) {
 #define TCPASSED(no) printf(PASSED"Testcase %u: Passed"ENDC"\n", (no))
 #define TCFAILED(no) printf(FAILED"Testcase %u: Failed"ENDC"\n", (no))
 
-#define BUF_SIZE        256
+#define BUF_SIZE        512
 
 /********************************/
 /* execute_mte_tests            */
@@ -266,7 +266,7 @@ int execute_mte_tests() {
 
         memset(p, 0xfe, BUF_SIZE);
 
-        int fd = open("/etc/passwd", O_RDONLY);
+        int fd = open("/system/etc/ssh/sshd_config", O_RDONLY);
 
         if (fd < 0) {
             failed(open, errno);
@@ -275,7 +275,7 @@ int execute_mte_tests() {
             int res = read(fd, p, BUF_SIZE);
 
             if (res > 0) {
-                if (strstr(p, "qnxuser:x:1000:1000:qnxuser:/data/home/qnxuser:/bin/sh") != 0) {
+                if (strstr(p, "AuthorizedKeysFile") != 0) {
                     TCPASSED(test_case_no);
                 } else {
                     TCFAILED(test_case_no);
