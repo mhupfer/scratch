@@ -208,7 +208,7 @@ int cont_term(pid64_t pid, bool status) {
     msg.i.type = _PROC_COREDUMP;
     msg.i.subtype = _PROC_COREDUMP_CONT_TERM;
     msg.i.pid = pid;
-    msg.i.success = status;
+    msg.i.status = status;
     
     return MsgSend(PROCMGR_COID, &msg, sizeof(msg), NULL, 0);
 }

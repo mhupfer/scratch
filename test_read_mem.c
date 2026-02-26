@@ -49,7 +49,7 @@ int main(int argn, char* argv[]) {
     int _test_failed = 0;
 
     // reading a kernel address should fail bcs. fseek fails
-    if (read_mem_procfs(KERNEL_ADDRESS, buffer, PAGE_SIZE) != -1 || errno != EINVAL) {
+    if (read_mem_procfs(KERNEL_ADDRESS, buffer, PAGE_SIZE) != -1 || errno != ESRVRFAULT) {
         test_failed;
     }
 

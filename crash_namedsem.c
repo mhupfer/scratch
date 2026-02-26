@@ -181,8 +181,8 @@ main(int argc, char *argv[]) {
     
     if (my_config.testcase_num == 1) {
         /**
-         * one the creates, unlinks nad close a named sem
-         * anopther thread does pidin fds: dup the sem's fd and call fdindo on it, 
+         * one the creates, unlinks and close a named sem
+         * another thread does pidin fds: dup the sem's fd and call fdindo on it, 
          * closes the dup'd fd
          */
         pthread_t t1, t2;

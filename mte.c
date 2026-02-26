@@ -144,10 +144,12 @@ void *create_tagged_ptr(void *untagged, size_t size) {
 
 #define BUF_SIZE        512
 
+#define FLAG_CRASH_TESTS    1
+
 /********************************/
 /* execute_mte_tests            */
 /********************************/
-int execute_mte_tests() {
+int execute_mte_tests(unsigned flags) {
     unsigned test_case_no = 1;
     bool    expect_exception = false;
     uint32_t *vtagged = NULL;
@@ -160,17 +162,19 @@ int execute_mte_tests() {
         return -1;
     }
 
-    signal(SIGSEGV, (void (*)(int))segv_handler);
     
-    if (sigsetjmp(jmpbuf, 1) != 0) {
-        if (expect_exception) {
-            TCPASSED(test_case_no);
-        } else {
-            TCFAILED(test_case_no);
+    if ((flags & FLAG_CRASH_TESTS) == 0) {
+        signal(SIGSEGV, (void (*)(int))segv_handler);
+        
+        if (sigsetjmp(jmpbuf, 1) != 0) {
+            if (expect_exception) {
+                TCPASSED(test_case_no);
+            } else {
+                TCFAILED(test_case_no);
+            }
+            test_case_no++;
         }
-        test_case_no++;
     }
-
 
     // access last element
     if (test_case_no == 1) {
@@ -304,7 +308,11 @@ int main(int argc, char* argv[]) {
     if (argv[1] != NULL) {
         /* child spawned with activated MTE */
         if (strcmp(argv[1], "MTE") == 0) {
-            return execute_mte_tests();
+            return execute_mte_tests(0);
+        }
+
+        if (strcmp(argv[1], "MTE_CRASH") == 0) {
+            return execute_mte_tests(FLAG_CRASH_TESTS);
         }
 
         if (strcmp(argv[1], "PRINT_REGISTERS") == 0) {
@@ -314,6 +322,10 @@ int main(int argc, char* argv[]) {
 
         if (strcmp(argv[1], "regs") == 0) {
             arg1 = "PRINT_REGISTERS";
+        }
+
+        if (strcmp(argv[1], "crash") == 0) {
+            arg1 = "MTE_CRASH";
         }
 
     }    
