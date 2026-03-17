@@ -117,6 +117,11 @@ int main(int argc, char* argv[]) {
         if (memcmp(&res, qnxhyp_uuid, sizeof(qnxhyp_uuid))) {
             test_failed;
         }
+
+        printf("x0=0x%x\n", res.x0);
+        printf("x1=0x%x\n", res.x1);
+        printf("x2=0x%x\n", res.x2);
+        printf("x3=0x%x\n", res.x3);
     }
 
     printf(PASSED"Test PASS"ENDC"\n");
