@@ -124,7 +124,7 @@ tester(int uid, struct child_data *d) {
     }
 
     char p[256];
-    d->exit_status = iofdinfo_xp(d->target_pid, 1, 0, NULL, p, sizeof(p)) == -1
+    d->exit_status = iofdinfo_xprocess(d->target_pid, 1, NULL, 0, NULL, p, sizeof(p)) == -1
                          ? EXIT_FAILURE
                          : EXIT_SUCCESS;
     return d->exit_status;
@@ -170,9 +170,10 @@ main(int argc, char *argv[]) {
     struct _fdinfo info;
     char path[PATH_MAX];
 
-    res = iofdinfo_xp(getpid(), 1, 0, &info, path, sizeof(path));
+    res = iofdinfo_xprocess(getpid(), 1, NULL, 0, &info, path, sizeof(path));
 
     if (res == -1) {
+        failed(iofdinfo_xp, errno);
         test_failed;
     } else {
         if (((strcmp("/dev/text", path) != 0) &&
@@ -197,13 +198,13 @@ main(int argc, char *argv[]) {
         warning(open, errno);
     } else {
 
-        res = iofdinfo_xp(getpid(), fd, 0, &info, path, sizeof(path));
+        res = iofdinfo_xprocess(getpid(), fd, NULL, 0, &info, path, sizeof(path));
 
         if (res == -1) {
             test_failed;
         } else {
             if (strcmp("/data/var/etc/group", path) != 0) {
-                printf("path=%s excpected %s\n", path, "/etc/group");
+                printf("path=%s excpected %s\n", path, "/data/var/etc/group");
                 test_failed;
             }
 
@@ -253,13 +254,13 @@ main(int argc, char *argv[]) {
     }
 
     // test iofdinfo_xp as root
-    res = iofdinfo_xp(pud->d1001.pid, 1, 0, &info, path, sizeof(path));
+    res = iofdinfo_xprocess(pud->d1001.pid, 1, NULL, 0, &info, path, sizeof(path));
 
     if (res == -1) {
         test_failed;
     }
 
-    res = iofdinfo_xp(pud->d1002.pid, 1, 0, &info, path, sizeof(path));
+    res = iofdinfo_xprocess(pud->d1002.pid, 1, NULL, 0, &info, path, sizeof(path));
 
     if (res == -1) {
         test_failed;

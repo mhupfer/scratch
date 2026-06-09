@@ -35,7 +35,7 @@
 #include <setjmp.h>
 #include <private/memtag.h>
 
-//build: ntoaarch64-gcc -march=armv8-a+memtag mte.c -o mte -Wall -g -I ~/mainline/stage/nto/usr/include/ -L ~/mainline/stage/nto/aarch64le/lib/ -lintrospection
+//build: ntoaarch64-gcc -march=armv8-a+memtag mte.c -o mte -Wall -g -I ~/mainline/stage_mte/nto/usr/include/ -L ~/mainline/stage_mte/nto/aarch64le/lib/ -lintrospection
 
 #define failed(f, e) fprintf(stderr, "%s:%d: %s() failed: %s\n", __func__, __LINE__, #f, strerror(e))
 
@@ -298,6 +298,26 @@ int execute_mte_tests(unsigned flags) {
     return EOK;
 }
 
+/********************************/
+/* check_mte_instruction        */
+/********************************/
+static inline bool check_mte_instruction(void) {
+    uint64_t reg_val = 0x1234;
+    uint64_t result = 0;
+    // This code attempts to execute ADDG (Add with Tag). If HCR_EL2.ATA is 0, 
+    // this should trigger an Exception Class 0x00 (Unknown/Undefined) at EL2.
+    asm volatile(
+        "mov x0, %1\n\t"
+        "addg x1, x0, 0, #1\n\t" // ADDG x1, x0, #0, #0 (Manual hex for ADDG)
+        "mov %0, x1\n\t"
+        : "=r" (result) 
+        : "r" (reg_val) 
+        : "x0", "x1"
+    );
+
+    printf("check_mte_instruction()=0x%lx\n", result);
+    return result == (reg_val | (1UL << 56));
+}
 
 /********************************/
 /* main							*/
@@ -320,12 +340,25 @@ int main(int argc, char* argv[]) {
             return EXIT_SUCCESS;
         }
 
+        if (strcmp(argv[1], "CHECK_MTE_INSTR") == 0) {
+            if (check_mte_instruction()) {
+                printf(PASSED"PASS"ENDC"\n");
+            } else {
+                printf(FAILED"FAIL"ENDC"\n");
+            }
+            return EXIT_SUCCESS;
+        }
+
         if (strcmp(argv[1], "regs") == 0) {
             arg1 = "PRINT_REGISTERS";
         }
 
         if (strcmp(argv[1], "crash") == 0) {
             arg1 = "MTE_CRASH";
+        }
+
+        if (strcmp(argv[1], "check") == 0) {
+            arg1 = "CHECK_MTE_INSTR";
         }
 
     }    
