@@ -41,6 +41,7 @@
 #if 0
 #define PASSED  "\033[92m"
 #define FAILED "\033[91m"
+#define YELLOW "\033[33m"
 #define ENDC  "\033[0m"
 
 #define test_failed {\
