@@ -36,13 +36,14 @@
 #include <private/memtag.h>
 
 //build: ntoaarch64-gcc -march=armv8-a+memtag mte.c -o mte -Wall -g -I ~/mainline/stage_mte/nto/usr/include/ -L ~/mainline/stage_mte/nto/aarch64le/lib/ -lintrospection
+//build: ntoaarch64-gcc -march=armv8-a+memtag mte.c -o mte -Wall -g -I $(get_stage_dir)/nto/usr/include/ -L $(get_stage_dir)/nto/aarch64le/lib/ -lintrospection
 
 #define failed(f, e) fprintf(stderr, "%s:%d: %s() failed: %s\n", __func__, __LINE__, #f, strerror(e))
 
 #define mssleep(t) usleep((t*1000UL))
 
 void print_mte_regs();
-char** create_memtag_environment(void);
+// char** create_memtag_environment(void);
 
 #define PASSED  "\033[92m"
 #define FAILED "\033[91m"
@@ -295,6 +296,55 @@ int execute_mte_tests(unsigned flags) {
         free(p);
         test_case_no++;
     }
+
+    if (test_case_no == 8) {
+        expect_exception = false;
+        printf("Testcase %u Fork and deref tagged pointers: ", test_case_no);
+        p = malloc(BUF_SIZE);
+
+        if (p == NULL) {
+            failed(malloc, ENOMEM);
+            return -1;
+        }
+
+        int child = fork();
+
+        switch (child)
+        {
+        case -1:
+            failed(fork, errno);
+            TCFAILED(test_case_no);
+            break;
+        case 0:
+            /* child */
+            signal(SIGSEGV, NULL);
+            *p = '1';
+            exit(EXIT_SUCCESS);
+        default:
+            break;
+        }
+
+        int status;
+        int result = waitpid(child, &status, 0);
+        
+        if (result == -1) {
+            failed(waitpid, errno);
+            TCFAILED(test_case_no);
+        } else {
+            if (WIFEXITED(status)) {
+                // Child terminated normally
+                TCPASSED(test_case_no);
+            } 
+            else if (WIFSIGNALED(status)) {
+                // Child crashed due to an unhandled signal (e.g., SIGSEGV, SIGABRT, SIGBUS)
+                TCFAILED(test_case_no);
+            }
+        }
+
+        free(p);
+        test_case_no++;
+    }
+
     return EOK;
 }
 
@@ -379,20 +429,21 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     /* Set the appropriate flag to make the changes take effect. */
-    if (posix_spawnattr_setxflags(&attr, POSIX_SPAWN_MEMTAG) != 0) {
-        failed(posix_spawnattr_setxflags, errno);
+    int rc = posix_spawnattr_setxflags(&attr, POSIX_SPAWN_MEMTAG);
+    if (rc != EOK) {
+        failed(posix_spawnattr_setxflags, rc);
         return -1;
     }
 
-    char **new_env = create_memtag_environment();
-    if (new_env == NULL) {
-        failed(create_memtag_environment, errno);
-        return -1;
-    }
+    // char **new_env = create_memtag_environment();
+    // if (new_env == NULL) {
+    //     failed(create_memtag_environment, errno);
+    //     return -1;
+    // }
 
     /* Spawn the child process. */
     if (posix_spawn(&child_pid, _argv[0], NULL, &attr,
-                    _argv, new_env) != 0) {
+                    _argv, NULL) != 0) {
         failed(posix_spawn, errno);
         return -1;
     }
@@ -510,7 +561,7 @@ void print_mte_regs() {
 }
 
 extern char **environ;
-
+#if 0
 /**
  * Create a new environment by copying current environment and adding MEMTAG=1
  * 
@@ -560,3 +611,4 @@ char** create_memtag_environment(void) {
     
     return new_env;
 }
+#endif

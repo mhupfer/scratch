@@ -35,6 +35,9 @@
 #include <getopt.h>
 
 //build: qcc test_threadpool2.c -o test_threadpool2 -I ~/mainline/stage/nto/usr/include/ -L ~/mainline/stage/nto/x86_64/lib/ -g
+//profile: ntoaarch64-gcc test_threadpool2.c -o test_threadpool2_aarch64 -I ~/mainline/stage/nto/usr/include/ -L ~/mainline/stage/nto/aarch64le/lib/ -g -finstrument-functions -lprofilingS
+
+
 
 #define failed(f, e) fprintf(stderr, "%s:%d: %s() failed: %s\n", __func__, __LINE__, #f, strerror(e))
 
@@ -60,11 +63,13 @@ typedef struct {
     unsigned    min_threads;
     unsigned    max_threads;
     unsigned    hysteresis;
+    unsigned    iterations;
 } cmdline_options;
 
 #define RESMGR_DEV "/dev/tpool2"
 #define NO_OF_WORKERS   5
 
+int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid);
 
 /********************************/
 /* print_usage                  */
@@ -82,9 +87,10 @@ static int parse_options(int argc, char **argv, cmdline_options *opts) {
     opts->min_threads = 2;
     opts->max_threads = 100;
     opts->hysteresis = 2;
+    opts->iterations = 1;
 
     while (optind < argc) {
-        int c = getopt(argc, argv, "v:m:M:h:?");
+        int c = getopt(argc, argv, "v:m:M:h:?i:");
 
         if (c == -1) {
             break;
@@ -102,6 +108,9 @@ static int parse_options(int argc, char **argv, cmdline_options *opts) {
                 break;
             case 'h':
                 opts->hysteresis = atoi(optarg);
+                break;
+            case 'i':
+                opts->iterations = atoi(optarg);
                 break;
             case '?':
                 print_usage();
@@ -130,6 +139,10 @@ static int parse_options(int argc, char **argv, cmdline_options *opts) {
         result = EINVAL;
     }
 
+    if (opts->iterations == 0) {
+        result = EINVAL;
+    }
+
     return result;
 }
 
@@ -150,11 +163,11 @@ int my_open(resmgr_context_t * const ctp, io_open_t * const msg, iofunc_attr_t *
 int my_read(resmgr_context_t *ctp, io_read_t *msg, iofunc_ocb_t *ocb) {
     (void)__atomic_add_fetch(&no_of_reads, 1, __ATOMIC_RELAXED);
 	return iofunc_read_default(ctp, msg, ocb);
-    // _IO_SET_READ_NBYTES(ctp, 0);
 }
 
-//------- worker -------
-
+/********************************/
+/* worker_gate_t                */
+/********************************/
 typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t  cond;
@@ -162,13 +175,21 @@ typedef struct {
     int             active_workers;  // Currently running workers
 } worker_gate_t;
 
-static worker_gate_t gate = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-    .cond = PTHREAD_COND_INITIALIZER,
-    .allowed_workers = 0,
-    .active_workers = 0
-};
 
+static worker_gate_t gate = {};
+
+
+/********************************/
+/* init_gate                    */
+/********************************/
+void init_gate(worker_gate_t *gate) {
+    *gate = (worker_gate_t) {
+        .lock = PTHREAD_MUTEX_INITIALIZER,
+        .cond = PTHREAD_COND_INITIALIZER,
+        .allowed_workers = 0,
+        .active_workers = 0
+    };
+}
 
 /********************************/
 /* wait4gate                    */
@@ -289,16 +310,51 @@ int main(int argc, char* argv[]) {
     	test_abort("resmgr_attach", errno);
     }
 
+    for (unsigned u = 0; u < opts.iterations; u++) {
+        printf(PASSED"Iteration %u"ENDC"\n", u + 1);
+        init_gate(&gate);
+        int rc = do_test(&opts, dpp, chid);
 
+        if (rc != EOK) {
+            test_failed(do_test, rc);
+            break;
+        }
+
+        if (gate.active_workers != 0) {
+            printf("There are active consumer threads\n");
+            break;
+        }
+    };
+
+    printf("Average number of reads %f\n", (float)no_of_reads / (float)opts.iterations);
+
+    // printf(PASSED"Test PASS"ENDC"\n");
+    return EXIT_SUCCESS;
+}
+
+
+/********************************/
+/* tp2_error_func               */
+/********************************/
+static void tp2_error_func(char const*const msg, unsigned loc, int err_no) {
+    fprintf(stderr, FAILED"%s:%d %s"ENDC"\n", msg, loc, strerror(err_no));
+}
+
+/********************************/
+/* do_test                      */
+/********************************/
+int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid) {
     thread_pool2_t  *pool2 = NULL;
     thread_pool_t   *pool = NULL;
 
-    if (opts.tpversion == 2) {
+    if (opts->tpversion == 2) {
         thread_pool2_attr_t poolattr;     
         
-        thread_pool2_attr_init(&poolattr, dpp, chid, opts.min_threads, opts.max_threads);
-        poolattr.tid_name = "Malocher";
-        poolattr.hysteresis = opts.hysteresis;
+        thread_pool2_attr_init(&poolattr, dpp, chid, opts->min_threads, opts->max_threads);
+        poolattr.tid_name = "Malocher2";
+        poolattr.hysteresis = opts->hysteresis;
+        poolattr.error_func = tp2_error_func;
+        poolattr.flags = THREAD_POOL2_FLAG_CALL_BLOCK_ERRF;
         
         pool2 = thread_pool2_create(&poolattr);
     
@@ -310,7 +366,7 @@ int main(int argc, char* argv[]) {
 
         if (rc != EOK) {
             failed(thread_pool2_start, rc);
-            return EXIT_FAILURE;
+            return rc;
         }
     } else {
         thread_pool_attr_t	pool_attr = {};
@@ -320,11 +376,11 @@ int main(int argc, char* argv[]) {
 	    pool_attr.unblock_func  = (void (*)(resmgr_context_t *))dispatch_unblock;
 	    pool_attr.handler_func  = (int (*)(resmgr_context_t *))dispatch_handler;
 	    pool_attr.context_free  = (void (*)(resmgr_context_t *))dispatch_context_free;
-	    pool_attr.tid_name      = "Malocher";
+	    pool_attr.tid_name      = "Malocher1";
     	pool_attr.lo_water  = 2;
     	pool_attr.hi_water  = 3;
     	pool_attr.increment = 1;
-    	pool_attr.maximum   = opts.max_threads;
+    	pool_attr.maximum   = opts->max_threads;
 
         pool =  thread_pool_create (&pool_attr, 0);
 
@@ -336,14 +392,14 @@ int main(int argc, char* argv[]) {
 
         if (rc != EOK) {
             failed(thread_pool_start, rc);
-            return EXIT_FAILURE;
+            return rc;
         }
     }
 
     
     if (waitfor_attach(RESMGR_DEV, 5000) == -1) {
         fprintf(stderr, FAILED"Path %snot created"ENDC"\n", RESMGR_DEV);
-        return EXIT_FAILURE;
+        return errno;
     }
 
     pthread_t thandle[NO_OF_WORKERS];
@@ -369,13 +425,12 @@ int main(int argc, char* argv[]) {
 
     // stop workers
     update_gate(-1);
-    mssleep(200);
 
     for (unsigned u = 0; u < NO_OF_WORKERS; u++) {
         pthread_join(thandle[u], NULL);
     }
 
-    if (opts.tpversion == 2) {
+    if (opts->tpversion == 2) {
         thread_pool2_statistics_t stats;
         thread_pool2_get_statistics(pool2, &stats);
         thread_pool2_destroy(pool2);
@@ -386,8 +441,5 @@ int main(int argc, char* argv[]) {
         thread_pool_destroy(pool);
     }
 
-    printf("Number of reads %u\n", no_of_reads);
-
-    // printf(PASSED"Test PASS"ENDC"\n");
-    return EXIT_SUCCESS;
+    return EOK;
 }
