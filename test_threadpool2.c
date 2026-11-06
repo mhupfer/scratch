@@ -33,9 +33,10 @@
 #include <sys/trace.h>
 #include <libgen.h>
 #include <getopt.h>
-
-//build: qcc test_threadpool2.c -o test_threadpool2 -I ~/mainline/stage/nto/usr/include/ -L ~/mainline/stage/nto/x86_64/lib/ -g
-//profile: ntoaarch64-gcc test_threadpool2.c -o test_threadpool2_aarch64 -I ~/mainline/stage/nto/usr/include/ -L ~/mainline/stage/nto/aarch64le/lib/ -g -finstrument-functions -lprofilingS
+#include <sys/introspection.h>
+//build: qcc test_threadpool2.c -o test_threadpool2 -I $(get_stage_dir)/nto/usr/include/ -L $(get_stage_dir)/nto/x86_64/lib/ -g -lintrospection
+//build ntoaarch64-gcc test_threadpool2.c -o test_threadpool2_aarch64 -I $(get_stage_dir)/nto/usr/include/ -L $(get_stage_dir)/nto/aarch64le/lib/ -g -lintrospection
+//profile: ntoaarch64-gcc test_threadpool2.c -o test_threadpool2_aarch64 -I $(get_stage_dir)/nto/usr/include/ -L $(get_stage_dir)/nto/aarch64le/lib/ -g -finstrument-functions -lprofilingS
 
 
 
@@ -66,10 +67,17 @@ typedef struct {
     unsigned    iterations;
 } cmdline_options;
 
+typedef struct {
+    int chid;
+    char *progname;
+} timeout_context_t;
+
 #define RESMGR_DEV "/dev/tpool2"
 #define NO_OF_WORKERS   5
+#define PULSE_CODE_TIMEOUT _PULSE_CODE_MINAVAIL
 
-int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid);
+int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid, timer_t timer_id);
+static void *monitor_thread(void *arg);
 
 /********************************/
 /* print_usage                  */
@@ -146,7 +154,7 @@ static int parse_options(int argc, char **argv, cmdline_options *opts) {
     return result;
 }
 
-//------- resmgr -------
+//--------------------- resmgr ---------------------
 uint32_t    no_of_reads;
 
 /********************************/
@@ -164,6 +172,8 @@ int my_read(resmgr_context_t *ctp, io_read_t *msg, iofunc_ocb_t *ocb) {
     (void)__atomic_add_fetch(&no_of_reads, 1, __ATOMIC_RELAXED);
 	return iofunc_read_default(ctp, msg, ocb);
 }
+
+//--------------------- test ---------------------
 
 /********************************/
 /* worker_gate_t                */
@@ -240,6 +250,27 @@ void update_gate(int count) {
 
 
 /********************************/
+/* arm_timer                    */
+/********************************/
+int arm_timer(timer_t timer_id, uint32_t sec) {
+    struct itimerspec its = {
+        .it_value.tv_sec = sec
+    };
+    return timer_settime(timer_id, 0, &its, NULL);    
+}
+
+
+/********************************/
+/* disarm_timer                 */
+/********************************/
+int disarm_timer(timer_t timer_id) {
+    struct itimerspec its = {};
+    return timer_settime(timer_id, 0, &its, NULL);    
+}
+
+
+
+/********************************/
 /* open_read                    */
 /********************************/
 void *open_read(void *arg) {
@@ -267,6 +298,54 @@ void *open_read(void *arg) {
 
     return NULL;
 }
+
+
+/********************************/
+/* drain_pulses                 */
+/********************************/
+static void
+drain_pulses(int chid)
+{
+    for (;;) {
+        struct _pulse pulse;
+        const uint64_t no_wait = 0;
+
+        /*
+         * TimerTimeout applies to the next receive operation only.
+         * Re-arm it before every MsgReceivePulse_r().
+         */
+        if (TimerTimeout(CLOCK_MONOTONIC,
+                         _NTO_TIMEOUT_RECEIVE,
+                         NULL,
+                         &no_wait,
+                         NULL) == -1) {
+            perror("TimerTimeout");
+            return;
+        }
+
+        const int rc = MsgReceivePulse_r(
+            chid, &pulse, sizeof(pulse), NULL);
+
+        if (rc == EOK) {
+            continue;
+        }
+
+        if (rc == ETIMEDOUT) {
+            /*
+             * No pulse was pending when the receive was attempted.
+             */
+            return;
+        }
+
+        if (rc == EINTR) {
+            continue;
+        }
+
+        return;
+    }
+}
+
+
 
 /********************************/
 /* main							*/
@@ -310,10 +389,37 @@ int main(int argc, char* argv[]) {
     	test_abort("resmgr_attach", errno);
     }
 
+    int monitor_chid = ChannelCreate(0);
+
+    if (monitor_chid == -1) {
+        test_abort(ChannelCreate, errno);
+    }
+
+    timeout_context_t ctx = {
+        .chid = monitor_chid,
+        .progname = basename(argv[0])
+    };
+
+    struct sigevent event;
+    timer_t timer_id;
+    SIGEV_PULSE_INIT(&event, -monitor_chid, SIGEV_PULSE_PRIO_INHERIT, PULSE_CODE_TIMEOUT, 0);
+
+    if (timer_create(CLOCK_MONOTONIC, &event, &timer_id) == -1) {
+        test_abort(timer_create, errno);
+    }
+
+    pthread_t hmonitor;
+
+    if (pthread_create(&hmonitor, NULL, monitor_thread, &ctx) != 0) {
+        test_abort(pthread_create, errno);
+    }    
+
     for (unsigned u = 0; u < opts.iterations; u++) {
         printf(PASSED"Iteration %u"ENDC"\n", u + 1);
         init_gate(&gate);
-        int rc = do_test(&opts, dpp, chid);
+        drain_pulses(chid);
+        
+        int rc = do_test(&opts, dpp, chid, timer_id);
 
         if (rc != EOK) {
             test_failed(do_test, rc);
@@ -328,6 +434,7 @@ int main(int argc, char* argv[]) {
 
     printf("Average number of reads %f\n", (float)no_of_reads / (float)opts.iterations);
 
+    pthread_cancel(hmonitor);
     // printf(PASSED"Test PASS"ENDC"\n");
     return EXIT_SUCCESS;
 }
@@ -343,7 +450,7 @@ static void tp2_error_func(char const*const msg, unsigned loc, int err_no) {
 /********************************/
 /* do_test                      */
 /********************************/
-int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid) {
+int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid, timer_t timer_id) {
     thread_pool2_t  *pool2 = NULL;
     thread_pool_t   *pool = NULL;
 
@@ -396,11 +503,14 @@ int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid) {
         }
     }
 
+    arm_timer(timer_id, 2);
     
     if (waitfor_attach(RESMGR_DEV, 5000) == -1) {
         fprintf(stderr, FAILED"Path %snot created"ENDC"\n", RESMGR_DEV);
         return errno;
     }
+
+    disarm_timer(timer_id);
 
     pthread_t thandle[NO_OF_WORKERS];
 
@@ -433,7 +543,9 @@ int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid) {
     if (opts->tpversion == 2) {
         thread_pool2_statistics_t stats;
         thread_pool2_get_statistics(pool2, &stats);
+        arm_timer(timer_id, 2);
         thread_pool2_destroy(pool2);
+        disarm_timer(timer_id);
         printf("Monitor wakeup send %u recv %u, Thread enter %u exit %u max %u\n",
             stats.monitor_send_wakeup, stats.monitor_recv_wakeup,
             stats.thread_enter, stats.thread_exit, stats.max_no_of_threads);
@@ -442,4 +554,44 @@ int do_test(cmdline_options const*const opts, dispatch_t *const dpp, int chid) {
     }
 
     return EOK;
+}
+
+
+// Monitor thread routine: Waits for timeout pulse or cancellation
+static void *monitor_thread(void *arg) {
+    timeout_context_t *ctx = (timeout_context_t *)arg;
+    struct _pulse pulse;
+
+    (void)pthread_setname_np(0, "TestMon");
+
+
+    // Block on channel waiting for the timer pulse
+    int rvid = MsgReceive(ctx->chid, &pulse, sizeof(pulse), NULL);
+
+    if (rvid == 0) { // Pulse received
+        if (pulse.code == PULSE_CODE_TIMEOUT) {
+#if 1
+            procfs_status status;
+            
+	        for(status.tid = 1; introspection_get_thread_status(0, status.tid, &status) == EOK; status.tid++) {
+#ifdef __aarch64__
+                procfs_greg	greg;
+                introspection_get_generalpurpose_regs(0, (unsigned)status.tid, &greg);
+                printf("Thread %d state=%d pc=0x%lx lr=0x%x\n", status.tid, status.state, status.ip,
+                    greg.aarch64.gpr[30]);
+#else
+                printf("Thread %d state=%d pc=0x%lx\n", status.tid, status.state, status.ip);
+#endif
+            }
+#else
+            char cmd[128];
+            snprintf(cmd, sizeof(cmd), "pidin -p %s threads", ctx->progname);
+            system(cmd);
+#endif 
+        }
+    } else {
+        perror("[Monitor] MsgReceive failed");
+    }
+
+    return NULL;
 }
